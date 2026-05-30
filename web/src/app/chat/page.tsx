@@ -1,13 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, LoaderCircle, Paperclip, SendHorizontal, Settings2, Trash2, X } from "lucide-react";
+import { FileText, History, LoaderCircle, Paperclip, Plus, SendHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -28,45 +26,8 @@ import { cn } from "@/lib/utils";
 
 const DEFAULT_CHAT_MODEL = "gpt-5-5";
 const CHAT_MODEL_STORAGE_KEY = "chatgpt2api:chat_last_model";
-const JSON_PLACEHOLDER = "留空表示不发送；填写 JSON 对象或数组";
-
-const emptyAdvancedSettings = {
-  temperature: "",
-  top_p: "",
-  max_completion_tokens: "",
-  max_tokens: "",
-  presence_penalty: "",
-  frequency_penalty: "",
-  n: "",
-  stop: "",
-  seed: "",
-  top_logprobs: "",
-  prompt_cache_key: "",
-  prompt_cache_retention: "",
-  safety_identifier: "",
-  reasoning_effort: "",
-  verbosity: "",
-  service_tier: "",
-  response_format: '{"type":"text"}',
-  modalities: "text",
-  store: false,
-  stream: false,
-  logprobs: false,
-  parallel_tool_calls: true,
-  metadata: "",
-  audio: "",
-  tools: "",
-  tool_choice: "",
-  functions: "",
-  function_call: "",
-  logit_bias: "",
-  prediction: "",
-  stream_options: "",
-  web_search_options: "",
-  user: "",
-};
-
-type AdvancedSettings = typeof emptyAdvancedSettings;
+const CHAT_CONVERSATIONS_STORAGE_KEY = "chatgpt2api:chat_conversations";
+const ACTIVE_CONVERSATION_STORAGE_KEY = "chatgpt2api:chat_active_conversation_id";
 
 type UiMessage = {
   id: string;
@@ -80,52 +41,18 @@ type AttachedFile = {
   name: string;
   type: string;
   size: number;
-  dataUrl: string;
+  dataUrl?: string;
   textPreview?: string;
 };
 
-type FieldConfig = {
-  key: keyof AdvancedSettings;
-  label: string;
-  placeholder?: string;
-  type?: "number" | "text";
-  deprecated?: boolean;
+type ChatConversation = {
+  id: string;
+  title: string;
+  model: string;
+  messages: UiMessage[];
+  createdAt: string;
+  updatedAt: string;
 };
-
-const numericFields: FieldConfig[] = [
-  { key: "temperature", label: "temperature", placeholder: "例如 1", type: "number" },
-  { key: "top_p", label: "top_p", placeholder: "例如 1", type: "number" },
-  { key: "max_completion_tokens", label: "max_completion_tokens", placeholder: "最大输出 token", type: "number" },
-  { key: "max_tokens", label: "max_tokens", placeholder: "旧字段", type: "number", deprecated: true },
-  { key: "presence_penalty", label: "presence_penalty", placeholder: "-2 到 2", type: "number" },
-  { key: "frequency_penalty", label: "frequency_penalty", placeholder: "-2 到 2", type: "number" },
-  { key: "n", label: "n", placeholder: "默认 1", type: "number" },
-  { key: "seed", label: "seed", placeholder: "确定性种子", type: "number" },
-  { key: "top_logprobs", label: "top_logprobs", placeholder: "0-20", type: "number" },
-];
-
-const textFields: FieldConfig[] = [
-  { key: "stop", label: "stop", placeholder: "字符串；多项用英文逗号分隔" },
-  { key: "prompt_cache_key", label: "prompt_cache_key" },
-  { key: "prompt_cache_retention", label: "prompt_cache_retention" },
-  { key: "safety_identifier", label: "safety_identifier" },
-  { key: "service_tier", label: "service_tier", placeholder: "auto / default / flex" },
-  { key: "user", label: "user", deprecated: true },
-];
-
-const jsonFields: FieldConfig[] = [
-  { key: "metadata", label: "metadata" },
-  { key: "response_format", label: "response_format" },
-  { key: "audio", label: "audio" },
-  { key: "tools", label: "tools" },
-  { key: "tool_choice", label: "tool_choice" },
-  { key: "functions", label: "functions", deprecated: true },
-  { key: "function_call", label: "function_call", deprecated: true },
-  { key: "logit_bias", label: "logit_bias" },
-  { key: "prediction", label: "prediction" },
-  { key: "stream_options", label: "stream_options" },
-  { key: "web_search_options", label: "web_search_options" },
-];
 
 function createId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -142,6 +69,19 @@ function formatBytes(value: number) {
     return `${(value / 1024).toFixed(1)} KB`;
   }
   return `${value} B`;
+}
+
+function formatConversationTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function readFileAsDataUrl(file: File) {
@@ -166,28 +106,38 @@ function readFileTextPreview(file: File) {
   });
 }
 
-function parseJsonField(value: string, label: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
+function sanitizeMessages(messages: UiMessage[]) {
+  return messages.map((message) => ({
+    ...message,
+    files: message.files?.map((file) => ({
+      id: file.id,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })),
+  }));
+}
+
+function buildConversationTitle(messages: UiMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const text = String(firstUserMessage?.content || "新对话").trim();
+  return text.length > 18 ? `${text.slice(0, 18)}...` : text;
+}
+
+function loadConversations() {
+  if (typeof window === "undefined") {
+    return [];
   }
   try {
-    return JSON.parse(trimmed) as unknown;
-  } catch (error) {
-    throw new Error(`${label} 不是合法 JSON：${error instanceof Error ? error.message : "解析失败"}`);
+    const value = JSON.parse(window.localStorage.getItem(CHAT_CONVERSATIONS_STORAGE_KEY) || "[]") as ChatConversation[];
+    return Array.isArray(value) ? value.filter((item) => item && typeof item.id === "string") : [];
+  } catch {
+    return [];
   }
 }
 
-function addNumber(payload: Record<string, unknown>, settings: AdvancedSettings, key: keyof AdvancedSettings) {
-  const value = String(settings[key] || "").trim();
-  if (!value) {
-    return;
-  }
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) {
-    throw new Error(`${String(key)} 必须是数字`);
-  }
-  payload[key] = numberValue;
+function saveConversations(conversations: ChatConversation[]) {
+  window.localStorage.setItem(CHAT_CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations.slice(0, 50)));
 }
 
 function buildRequestMessages(messages: UiMessage[], prompt: string, files: AttachedFile[]) {
@@ -199,13 +149,15 @@ function buildRequestMessages(messages: UiMessage[], prompt: string, files: Atta
   const content: string | ChatContentPart[] = files.length
     ? [
         ...(trimmedPrompt ? [{ type: "text" as const, text: trimmedPrompt }] : []),
-        ...files.map((file) => ({
-          type: "file" as const,
-          file: {
-            filename: file.name,
-            file_data: file.dataUrl,
-          },
-        })),
+        ...files
+          .filter((file) => file.dataUrl)
+          .map((file) => ({
+            type: "file" as const,
+            file: {
+              filename: file.name,
+              file_data: file.dataUrl,
+            },
+          })),
         ...files
           .filter((file) => file.textPreview)
           .map((file) => ({
@@ -218,44 +170,8 @@ function buildRequestMessages(messages: UiMessage[], prompt: string, files: Atta
   return [...history, { role: "user" as const, content }];
 }
 
-function buildChatPayload(model: string, messages: ChatMessage[], settings: AdvancedSettings): ChatCompletionRequest {
-  const payload: Record<string, unknown> = { model, messages };
-
-  numericFields.forEach((field) => addNumber(payload, settings, field.key));
-  textFields.forEach((field) => {
-    const value = String(settings[field.key] || "").trim();
-    if (!value) {
-      return;
-    }
-    payload[field.key] = field.key === "stop" && value.includes(",")
-      ? value.split(",").map((item) => item.trim()).filter(Boolean)
-      : value;
-  });
-
-  const modalities = settings.modalities.split(",").map((item) => item.trim()).filter(Boolean);
-  if (modalities.length > 0) {
-    payload.modalities = modalities;
-  }
-
-  (["store", "stream", "logprobs", "parallel_tool_calls"] as const).forEach((key) => {
-    payload[key] = settings[key];
-  });
-
-  if (settings.reasoning_effort) {
-    payload.reasoning_effort = settings.reasoning_effort;
-  }
-  if (settings.verbosity) {
-    payload.verbosity = settings.verbosity;
-  }
-
-  jsonFields.forEach((field) => {
-    const parsed = parseJsonField(String(settings[field.key] || ""), field.label);
-    if (parsed !== undefined) {
-      payload[field.key] = parsed;
-    }
-  });
-
-  return payload as ChatCompletionRequest;
+function buildChatPayload(model: string, messages: ChatMessage[]): ChatCompletionRequest {
+  return { model, messages };
 }
 
 function streamTextToAssistantText(value: string) {
@@ -314,24 +230,32 @@ function ChatLoading() {
 
 export default function ChatPage() {
   const { isCheckingAuth, session } = useAuthGuard();
+  const [conversations, setConversations] = useState<ChatConversation[]>(() => loadConversations());
+  const initialActiveConversation = useMemo(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    const storedActiveId = window.localStorage.getItem(ACTIVE_CONVERSATION_STORAGE_KEY) || "";
+    return conversations.find((item) => item.id === storedActiveId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [models, setModels] = useState<string[]>([DEFAULT_CHAT_MODEL]);
-  const [model, setModel] = useState(DEFAULT_CHAT_MODEL);
-  const [customModel, setCustomModel] = useState("");
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [model, setModel] = useState(() => {
+    if (initialActiveConversation?.model) {
+      return initialActiveConversation.model;
+    }
+    if (typeof window === "undefined") {
+      return DEFAULT_CHAT_MODEL;
+    }
+    return window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || DEFAULT_CHAT_MODEL;
+  });
+  const [messages, setMessages] = useState<UiMessage[]>(() => initialActiveConversation?.messages || []);
+  const [activeConversationId, setActiveConversationId] = useState(() => initialActiveConversation?.id || "");
   const [prompt, setPrompt] = useState("");
   const [files, setFiles] = useState<AttachedFile[]>([]);
-  const [settings, setSettings] = useState<AdvancedSettings>(emptyAdvancedSettings);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY);
-    if (stored) {
-      setModel(stored);
-    }
-  }, []);
 
   useEffect(() => {
     if (!session) {
@@ -357,14 +281,56 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, isLoading]);
 
-  const selectedModel = customModel.trim() || model;
-
   const canSend = useMemo(() => {
-    return !isLoading && selectedModel.trim() && (prompt.trim() || files.length > 0);
-  }, [files.length, isLoading, prompt, selectedModel]);
+    return !isLoading && model.trim() && (prompt.trim() || files.length > 0);
+  }, [files.length, isLoading, prompt, model]);
 
-  const updateSetting = (key: keyof AdvancedSettings, value: string | boolean) => {
-    setSettings((current) => ({ ...current, [key]: value }));
+  const persistConversation = (conversationId: string, nextMessages: UiMessage[], nextModel: string) => {
+    const now = new Date().toISOString();
+    const existing = conversations.find((item) => item.id === conversationId);
+    const nextConversation: ChatConversation = {
+      id: conversationId,
+      title: buildConversationTitle(nextMessages),
+      model: nextModel,
+      messages: sanitizeMessages(nextMessages),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    const nextConversations = [
+      nextConversation,
+      ...conversations.filter((item) => item.id !== conversationId),
+    ].slice(0, 50);
+    setConversations(nextConversations);
+    saveConversations(nextConversations);
+    setActiveConversationId(conversationId);
+    window.localStorage.setItem(ACTIVE_CONVERSATION_STORAGE_KEY, conversationId);
+    window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, nextModel);
+  };
+
+  const handleNewConversation = () => {
+    setActiveConversationId("");
+    setMessages([]);
+    setPrompt("");
+    setFiles([]);
+    window.localStorage.removeItem(ACTIVE_CONVERSATION_STORAGE_KEY);
+  };
+
+  const handleSelectConversation = (conversation: ChatConversation) => {
+    setActiveConversationId(conversation.id);
+    setMessages(conversation.messages);
+    setModel(conversation.model || DEFAULT_CHAT_MODEL);
+    setPrompt("");
+    setFiles([]);
+    window.localStorage.setItem(ACTIVE_CONVERSATION_STORAGE_KEY, conversation.id);
+  };
+
+  const handleDeleteConversation = (conversationId: string) => {
+    const nextConversations = conversations.filter((item) => item.id !== conversationId);
+    setConversations(nextConversations);
+    saveConversations(nextConversations);
+    if (conversationId === activeConversationId) {
+      handleNewConversation();
+    }
   };
 
   const handleFiles = async (items: FileList | null) => {
@@ -399,27 +365,22 @@ export default function ChatPage() {
     }
     const userPrompt = prompt.trim();
     const attachedFiles = files;
-    let requestMessages: ChatMessage[];
-    let payload: ChatCompletionRequest;
-    try {
-      requestMessages = buildRequestMessages(messages, userPrompt, attachedFiles);
-      payload = buildChatPayload(selectedModel, requestMessages, settings);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "参数配置错误");
-      return;
-    }
-
+    const conversationId = activeConversationId || createId();
+    const requestMessages = buildRequestMessages(messages, userPrompt, attachedFiles);
+    const payload = buildChatPayload(model, requestMessages);
     const userMessage: UiMessage = {
       id: createId(),
       role: "user",
       content: userPrompt || "[仅发送文件]",
       files: attachedFiles,
     };
-    setMessages((current) => [...current, userMessage]);
+    const messagesWithUser = [...messages, userMessage];
+
+    setMessages(messagesWithUser);
+    persistConversation(conversationId, messagesWithUser, model);
     setPrompt("");
     setFiles([]);
     setIsLoading(true);
-    window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, selectedModel);
 
     try {
       const response = await createChatCompletion(payload);
@@ -427,19 +388,23 @@ export default function ChatPage() {
       const firstChoice = typeof maybeStream === "string" ? undefined : response.choices[0];
       const content = (typeof maybeStream === "string" ? streamTextToAssistantText(maybeStream) : messageContentToText(firstChoice?.message))
         || "[模型没有返回文本内容]";
-      setMessages((current) => [
-        ...current,
-        { id: createId(), role: "assistant", content },
-      ]);
+      const nextMessages = [
+        ...messagesWithUser,
+        { id: createId(), role: "assistant" as const, content },
+      ];
+      setMessages(nextMessages);
+      persistConversation(conversationId, nextMessages, model);
     } catch (error) {
-      setMessages((current) => [
-        ...current,
+      const nextMessages = [
+        ...messagesWithUser,
         {
           id: createId(),
-          role: "assistant",
+          role: "assistant" as const,
           content: `请求失败：${error instanceof Error ? error.message : "未知错误"}`,
         },
-      ]);
+      ];
+      setMessages(nextMessages);
+      persistConversation(conversationId, nextMessages, model);
       toast.error(error instanceof Error ? error.message : "请求失败");
     } finally {
       setIsLoading(false);
@@ -451,40 +416,79 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">
-      <section className="flex flex-col gap-4 rounded-[32px] border border-white/70 bg-white/80 p-5 shadow-[0_24px_80px_-60px_rgba(15,23,42,0.75)] backdrop-blur dark:border-white/10 dark:bg-stone-950/60">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-medium text-blue-600 dark:text-blue-300">/v1/chat/completions</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950 dark:text-stone-50">对话调试台</h1>
-            <p className="mt-2 max-w-3xl text-sm text-stone-500 dark:text-stone-400">
-              默认使用 {DEFAULT_CHAT_MODEL}，支持切换模型、上传文件，并覆盖 Chat Completions 的常用与高级参数。
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)] lg:w-[520px]">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-stone-500 dark:text-stone-400">模型</label>
-              <Select value={model} onValueChange={setModel}>
-                <SelectTrigger>
-                  <SelectValue placeholder="选择模型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((item) => (
-                    <SelectItem key={item} value={item}>{item}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+    <main className="mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[300px_1fr]">
+      <aside className="space-y-4">
+        <Card className="rounded-[28px] border-white/70 bg-white/80 shadow-[0_24px_80px_-60px_rgba(15,23,42,0.75)] dark:border-white/10 dark:bg-stone-950/60">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-stone-900 dark:text-stone-50">
+                <History className="size-4" />
+                历史对话
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={handleNewConversation}>
+                <Plus className="size-4" />
+                新对话
+              </Button>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-stone-500 dark:text-stone-400">自定义模型（优先）</label>
-              <Input value={customModel} onChange={(event) => setCustomModel(event.target.value)} placeholder="例如 gpt-5.1" />
+            <div className="max-h-[calc(100vh-12rem)] space-y-2 overflow-y-auto pr-1">
+              {conversations.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-stone-200 px-3 py-8 text-center text-sm text-stone-400 dark:border-white/10">
+                  暂无历史
+                </div>
+              ) : conversations.map((conversation) => {
+                const active = conversation.id === activeConversationId;
+                return (
+                  <div
+                    key={conversation.id}
+                    className={cn(
+                      "group flex items-start gap-2 rounded-2xl border px-3 py-2 transition",
+                      active
+                        ? "border-stone-950 bg-stone-950 text-white dark:border-white dark:bg-white dark:text-stone-950"
+                        : "border-stone-100 bg-white/70 text-stone-700 hover:border-stone-200 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-stone-200 dark:hover:bg-white/10",
+                    )}
+                  >
+                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => handleSelectConversation(conversation)}>
+                      <div className="truncate text-sm font-medium">{conversation.title}</div>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] opacity-60">
+                        <span>{conversation.model}</span>
+                        <span>{formatConversationTime(conversation.updatedAt)}</span>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className={cn("mt-0.5 opacity-50 transition hover:text-rose-500 hover:opacity-100", active && "hover:text-rose-300")}
+                      onClick={() => handleDeleteConversation(conversation.id)}
+                      title="删除对话"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+          </CardContent>
+        </Card>
+      </aside>
+
+      <section className="flex min-w-0 flex-col gap-5">
+        <div className="flex flex-col gap-3 rounded-[32px] border border-white/70 bg-white/80 p-5 shadow-[0_24px_80px_-60px_rgba(15,23,42,0.75)] backdrop-blur dark:border-white/10 dark:bg-stone-950/60 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-2xl font-semibold tracking-tight text-stone-950 dark:text-stone-50">对话</h1>
+          <div className="w-full space-y-1.5 sm:w-72">
+            <label className="text-xs font-medium text-stone-500 dark:text-stone-400">模型</label>
+            <Select value={model} onValueChange={setModel}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择模型" />
+              </SelectTrigger>
+              <SelectContent>
+                {models.map((item) => (
+                  <SelectItem key={item} value={item}>{item}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
-      </section>
 
-      <div className="grid flex-1 gap-5 lg:grid-cols-[1fr_360px]">
-        <Card className="overflow-hidden rounded-[32px] border-white/70 bg-white/80 shadow-[0_24px_80px_-60px_rgba(15,23,42,0.75)] dark:border-white/10 dark:bg-stone-950/60">
+        <Card className="min-w-0 flex-1 overflow-hidden rounded-[32px] border-white/70 bg-white/80 shadow-[0_24px_80px_-60px_rgba(15,23,42,0.75)] dark:border-white/10 dark:bg-stone-950/60">
           <CardContent className="flex h-[calc(100vh-14rem)] min-h-[520px] flex-col p-0">
             <div className="flex-1 space-y-4 overflow-y-auto p-5">
               {messages.length === 0 ? (
@@ -494,7 +498,7 @@ export default function ChatPage() {
                       <SendHorizontal className="size-5" />
                     </div>
                     <h2 className="text-base font-semibold text-stone-900 dark:text-stone-50">开始一次对话</h2>
-                    <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">输入问题、附加文件，并按需展开右侧高级参数后发送。</p>
+                    <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">输入消息或添加文件后发送。</p>
                   </div>
                 </div>
               ) : (
@@ -574,118 +578,12 @@ export default function ChatPage() {
                   <Button type="button" size="icon" disabled={!canSend} onClick={() => void handleSubmit()} title="发送">
                     <SendHorizontal className="size-4" />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => setMessages([])} title="清空对话">
-                    <Trash2 className="size-4" />
-                  </Button>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
-
-        <aside className="space-y-4">
-          <Card className="rounded-[28px] border-white/70 bg-white/80 dark:border-white/10 dark:bg-stone-950/60">
-            <CardContent className="space-y-4 p-5">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between text-left"
-                onClick={() => setShowAdvanced((value) => !value)}
-              >
-                <span>
-                  <span className="flex items-center gap-2 text-sm font-semibold text-stone-900 dark:text-stone-50"><Settings2 className="size-4" /> 高级参数</span>
-                  <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">覆盖官方 Chat Completions request body 字段</span>
-                </span>
-                <span className="text-xs text-stone-400">{showAdvanced ? "收起" : "展开"}</span>
-              </button>
-
-              {showAdvanced ? (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["store", "stream", "logprobs", "parallel_tool_calls"] as const).map((key) => (
-                      <label key={key} className="flex items-center gap-2 rounded-2xl border border-stone-100 px-3 py-2 text-xs dark:border-white/10">
-                        <Checkbox checked={settings[key]} onCheckedChange={(checked) => updateSetting(key, checked === true)} />
-                        <span>{key}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <div className="grid gap-3">
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-stone-500">reasoning_effort</label>
-                      <Select value={settings.reasoning_effort || "unset"} onValueChange={(value) => updateSetting("reasoning_effort", value === "unset" ? "" : value)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unset">不发送</SelectItem>
-                          <SelectItem value="minimal">minimal</SelectItem>
-                          <SelectItem value="low">low</SelectItem>
-                          <SelectItem value="medium">medium</SelectItem>
-                          <SelectItem value="high">high</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-stone-500">verbosity</label>
-                      <Select value={settings.verbosity || "unset"} onValueChange={(value) => updateSetting("verbosity", value === "unset" ? "" : value)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unset">不发送</SelectItem>
-                          <SelectItem value="low">low</SelectItem>
-                          <SelectItem value="medium">medium</SelectItem>
-                          <SelectItem value="high">high</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">数值字段</h3>
-                    {numericFields.map((field) => (
-                      <div key={field.key} className="space-y-1.5">
-                        <label className="text-xs font-medium text-stone-500">{field.label}{field.deprecated ? "（deprecated）" : ""}</label>
-                        <Input
-                          type={field.type || "text"}
-                          value={String(settings[field.key])}
-                          onChange={(event) => updateSetting(field.key, event.target.value)}
-                          placeholder={field.placeholder}
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">文本字段</h3>
-                    <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-stone-500">modalities</label>
-                      <Input value={settings.modalities} onChange={(event) => updateSetting("modalities", event.target.value)} placeholder="text 或 text,audio" />
-                    </div>
-                    {textFields.map((field) => (
-                      <div key={field.key} className="space-y-1.5">
-                        <label className="text-xs font-medium text-stone-500">{field.label}{field.deprecated ? "（deprecated）" : ""}</label>
-                        <Input value={String(settings[field.key])} onChange={(event) => updateSetting(field.key, event.target.value)} placeholder={field.placeholder} />
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">JSON 字段</h3>
-                    {jsonFields.map((field) => (
-                      <div key={field.key} className="space-y-1.5">
-                        <label className="text-xs font-medium text-stone-500">{field.label}{field.deprecated ? "（deprecated）" : ""}</label>
-                        <Textarea
-                          value={String(settings[field.key])}
-                          onChange={(event) => updateSetting(field.key, event.target.value)}
-                          placeholder={JSON_PLACEHOLDER}
-                          className="min-h-20 rounded-2xl font-mono text-xs"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </aside>
-      </div>
+      </section>
     </main>
   );
 }

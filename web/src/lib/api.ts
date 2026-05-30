@@ -75,39 +75,7 @@ export type ChatMessage = {
 export type ChatCompletionRequest = {
   model: string;
   messages: ChatMessage[];
-  audio?: Record<string, unknown>;
-  frequency_penalty?: number;
-  function_call?: unknown;
-  functions?: unknown[];
-  logit_bias?: Record<string, number>;
-  logprobs?: boolean;
-  top_logprobs?: number;
-  max_completion_tokens?: number;
-  max_tokens?: number;
-  metadata?: Record<string, string>;
-  modalities?: string[];
-  n?: number;
-  parallel_tool_calls?: boolean;
-  prediction?: Record<string, unknown>;
-  presence_penalty?: number;
-  prompt_cache_key?: string;
-  prompt_cache_retention?: string;
-  reasoning_effort?: string;
-  response_format?: Record<string, unknown>;
-  safety_identifier?: string;
-  seed?: number;
-  service_tier?: string;
-  stop?: string | string[];
-  store?: boolean;
   stream?: boolean;
-  stream_options?: Record<string, unknown>;
-  temperature?: number;
-  tool_choice?: unknown;
-  tools?: unknown[];
-  top_p?: number;
-  user?: string;
-  verbosity?: string;
-  web_search_options?: Record<string, unknown>;
 };
 
 export type ChatCompletionResponse = {

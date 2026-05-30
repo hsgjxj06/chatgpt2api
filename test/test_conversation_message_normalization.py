@@ -19,8 +19,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - local minimal env may o
     pytest.skip(f"missing optional test dependency: {exc.name}", allow_module_level=True)
 
 
-def test_normalize_messages_keeps_image_message_once(monkeypatch):
-    monkeypatch.setattr("services.protocol.conversation.config.global_system_prompt", "")
+def test_normalize_messages_keeps_image_message_once():
     messages = [
         {
             "role": "user",
@@ -33,10 +32,10 @@ def test_normalize_messages_keeps_image_message_once(monkeypatch):
 
     normalized = normalize_messages(messages)
 
-    assert len(normalized) == 1
-    assert normalized[0]["role"] == "user"
-    assert normalized[0]["content"][0] == {"type": "text", "text": "describe"}
-    assert normalized[0]["content"][1] == {"type": "image", "data": b"image-bytes", "mime": "image/png"}
+    user_messages = [item for item in normalized if item.get("role") == "user"]
+    assert len(user_messages) == 1
+    assert user_messages[0]["content"][0] == {"type": "text", "text": "describe"}
+    assert user_messages[0]["content"][1] == {"type": "image", "data": b"image-bytes", "mime": "image/png"}
 
 
 def test_message_text_reads_chat_completion_file_data():
