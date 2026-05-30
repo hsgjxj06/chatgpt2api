@@ -57,6 +57,75 @@ export type Model = {
   parent: string | null;
 };
 
+
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: string } }
+  | { type: "file"; file: { filename?: string; file_data?: string; file_id?: string } };
+
+export type ChatMessage = {
+  role: "system" | "developer" | "user" | "assistant" | "tool" | "function";
+  content?: string | ChatContentPart[] | null;
+  name?: string;
+  tool_call_id?: string;
+  tool_calls?: unknown;
+  function_call?: unknown;
+};
+
+export type ChatCompletionRequest = {
+  model: string;
+  messages: ChatMessage[];
+  audio?: Record<string, unknown>;
+  frequency_penalty?: number;
+  function_call?: unknown;
+  functions?: unknown[];
+  logit_bias?: Record<string, number>;
+  logprobs?: boolean;
+  top_logprobs?: number;
+  max_completion_tokens?: number;
+  max_tokens?: number;
+  metadata?: Record<string, string>;
+  modalities?: string[];
+  n?: number;
+  parallel_tool_calls?: boolean;
+  prediction?: Record<string, unknown>;
+  presence_penalty?: number;
+  prompt_cache_key?: string;
+  prompt_cache_retention?: string;
+  reasoning_effort?: string;
+  response_format?: Record<string, unknown>;
+  safety_identifier?: string;
+  seed?: number;
+  service_tier?: string;
+  stop?: string | string[];
+  store?: boolean;
+  stream?: boolean;
+  stream_options?: Record<string, unknown>;
+  temperature?: number;
+  tool_choice?: unknown;
+  tools?: unknown[];
+  top_p?: number;
+  user?: string;
+  verbosity?: string;
+  web_search_options?: Record<string, unknown>;
+};
+
+export type ChatCompletionResponse = {
+  id: string;
+  object: string;
+  created: number;
+  model: string;
+  choices: Array<{
+    index: number;
+    message?: ChatMessage;
+    delta?: Partial<ChatMessage>;
+    finish_reason?: string | null;
+    logprobs?: unknown;
+  }>;
+  usage?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 type AccountListResponse = {
   items: Account[];
 };
@@ -295,6 +364,14 @@ export async function fetchAccounts() {
 
 export async function fetchModels() {
   return httpRequest<ModelListResponse>("/v1/models");
+}
+
+
+export async function createChatCompletion(payload: ChatCompletionRequest) {
+  return httpRequest<ChatCompletionResponse>("/v1/chat/completions", {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export async function createAccounts(tokens: string[], accounts: AccountImportPayload[] = []) {

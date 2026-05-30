@@ -88,6 +88,40 @@ def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     return image_storage_service.save(image_data, base_url).url
 
 
+def _decode_file_data_text(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    payload = value.split(",", 1)[1] if value.startswith("data:") and "," in value else value
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except Exception:
+        return ""
+    if not data:
+        return ""
+    try:
+        return data[:512 * 1024].decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def file_part_text(item: dict[str, Any]) -> str:
+    file_obj = item.get("file") if isinstance(item.get("file"), dict) else item
+    if not isinstance(file_obj, dict):
+        return ""
+    filename = str(file_obj.get("filename") or file_obj.get("file_name") or "").strip()
+    file_id = str(file_obj.get("file_id") or "").strip()
+    file_data = file_obj.get("file_data") or file_obj.get("data")
+    decoded = _decode_file_data_text(file_data)
+    title = filename or file_id or "unnamed file"
+    if decoded:
+        return f"\n\n[Attached file: {title}]\n{decoded}"
+    if file_id:
+        return f"\n\n[Attached file id: {file_id}{f' ({filename})' if filename else ''}]"
+    if filename:
+        return f"\n\n[Attached file: {filename}; no readable text content was provided]"
+    return ""
+
+
 def message_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -98,6 +132,8 @@ def message_text(content: Any) -> str:
                 parts.append(item)
             elif isinstance(item, dict) and str(item.get("type") or "") in {"text", "input_text", "output_text"}:
                 parts.append(str(item.get("text") or ""))
+            elif isinstance(item, dict) and str(item.get("type") or "") in {"file", "input_file"}:
+                parts.append(file_part_text(item))
         return "".join(parts)
     return ""
 
