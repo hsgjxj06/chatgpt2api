@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { clearStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 
 const adminNavItems = [
+  { href: "/chat", label: "对话" },
   { href: "/image", label: "生图" },
   { href: "/accounts", label: "号池管理" },
   { href: "/register", label: "注册机" },
@@ -21,7 +22,10 @@ const adminNavItems = [
   { href: "/settings", label: "设置" },
 ];
 
-const userNavItems = [{ href: "/image", label: "画图" }];
+const userNavItems = [
+  { href: "/chat", label: "对话" },
+  { href: "/image", label: "画图" },
+];
 
 export function TopNav() {
   const pathname = usePathname();
@@ -112,7 +116,7 @@ export function TopNav() {
             </SheetContent>
           </Sheet>
           <Link
-            href="/image"
+            href="/chat"
             className="shrink-0 py-1 text-[15px] font-bold tracking-tight text-stone-950 transition hover:text-stone-700 dark:text-stone-50 dark:hover:text-white"
           >
             chatgpt2api
