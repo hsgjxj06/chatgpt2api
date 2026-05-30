@@ -643,7 +643,11 @@ def stream_image_outputs(
     if message and not file_ids and not sediment_ids and last.get("blocked"):
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message)
         return
-    should_poll_for_image = bool(request.images) or last.get("turn_use_case") == "image gen"
+    should_poll_for_image = (
+        bool(request.images)
+        or last.get("turn_use_case") == "image gen"
+        or last.get("tool_invoked") is True
+    )
     if message and not file_ids and not sediment_ids and not should_poll_for_image:
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message)
         return

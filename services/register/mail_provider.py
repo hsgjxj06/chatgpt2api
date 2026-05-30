@@ -487,8 +487,17 @@ class CloudMailGenProvider(BaseMailProvider):
             cloudmail_token_cache[cache_key] = (token, now + 24 * 3600)
         return token
 
+    def _resolve_domain(self) -> str:
+        if self.domain:
+            return _next_domain(self.domain)
+        _, _, admin_domain = self.admin_email.partition("@")
+        admin_domain = admin_domain.strip()
+        if not admin_domain:
+            raise RuntimeError("CloudMailGen 需要至少配置一个 domain，或使用带域名的 admin_email 作为默认域名")
+        return admin_domain
+
     def _resolve_address(self, username: str | None = None) -> str:
-        domain = _next_domain(self.domain)
+        domain = self._resolve_domain()
         if self.subdomain:
             domain = f"{random.choice(self.subdomain)}.{domain}"
         if username:
@@ -500,8 +509,6 @@ class CloudMailGenProvider(BaseMailProvider):
         return f"{local_part}@{domain}"
 
     def create_mailbox(self, username: str | None = None) -> dict[str, Any]:
-        if not self.domain:
-            raise RuntimeError("CloudMailGen 需要至少配置一个 domain")
         address = self._resolve_address(username)
         return {"provider": self.name, "provider_ref": self.provider_ref, "address": address}
 
